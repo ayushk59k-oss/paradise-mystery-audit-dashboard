@@ -288,12 +288,33 @@ function parseServing(servingRaw, itemsOrderedRaw) {
 
   const items = [];
   if (itemsOrderedRaw) {
+    const numberedLines = [];
     itemsOrderedRaw.split('\n').forEach(line => {
       const m = line.match(/^\d+\.\s*(.+)$/);
-      if (!m) return;
-      const name = m[1].trim().replace(/\s*[–-]\s*\d+\s*qty\s*$/i, '').trim();
-      if (name) items.push(name);
+      if (m) numberedLines.push(m[1]);
     });
+    if (numberedLines.length) {
+      // Numbered list format: "1. Item A\n2. Item B"
+      numberedLines.forEach(raw => {
+        const name = raw.trim().replace(/\s*[–-]\s*\d+\s*qty\s*$/i, '').trim();
+        if (name) items.push(name);
+      });
+    } else {
+      // Unnumbered free text: one dish per line, or multiple dishes on one
+      // line joined by "and" (e.g. "Chicken Nizami Biryani\nTandoori Chicken",
+      // or "Nizami Mutton Biryani and Paneer Chilli"). Without this fallback
+      // `items` stays empty, which silently disables the plausibility check
+      // below and lets a coincidental two-clock-times match in the serving
+      // narrative masquerade as a genuine per-item result.
+      itemsOrderedRaw.split('\n').forEach(rawLine => {
+        const line = rawLine.trim();
+        if (!line) return;
+        line.split(/\s+and\s+/i).forEach(part => {
+          const name = part.trim().replace(/\s*[–-]\s*\d+\s*qty\s*$/i, '').trim();
+          if (name) items.push(name);
+        });
+      });
+    }
   }
 
   // Strategy 0: explicit joint-serving override, e.g. "9 minutes after the
@@ -321,7 +342,13 @@ function parseServing(servingRaw, itemsOrderedRaw) {
 
   // Strategy 2: direct "X minutes" phrasing.
   items.forEach(item => {
-    const words = item.split(/\s+/).filter(w => w.length > 3).sort((a, b) => b.length - a.length);
+    // Strip regex-special characters (parens, etc. — e.g. a combo item name
+    // like "Meal for Three (Combo Offer)") so a word built from the item
+    // name can't be interpreted as regex syntax when used to build `re`.
+    const words = item.split(/\s+/)
+      .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .filter(w => w.replace(/\\/g, '').length > 3)
+      .sort((a, b) => b.length - a.length);
     for (const w of words) {
       const re = new RegExp(w + '[^.]*?(\\d+)\\s*minutes', 'i');
       const m = servingRaw.match(re);
