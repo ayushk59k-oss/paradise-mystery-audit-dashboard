@@ -4,11 +4,13 @@
   "private": true,
   "description": "Checks for new mystery audit data daily; screenshots and emails the dashboard only if data changed.",
   "scripts": {
-    "daily-check": "node scripts/daily-check.js"
+    "daily-check": "node scripts/daily-check.js",
+    "sync-audits": "node scripts/sync-audits.js"
   },
   "dependencies": {
     "googleapis": "^140.0.1",
     "nodemailer": "^6.9.14",
+    "pdf-parse": "^2.4.5",
     "puppeteer": "^22.15.0"
   }
 }
