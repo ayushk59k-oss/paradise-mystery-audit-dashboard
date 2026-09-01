@@ -5,14 +5,16 @@ const { SECTIONS } = require('./template');
 
 // ---- text cleanup ----
 function cleanText(raw) {
-  return raw
+  // strip the repeated page-header banner ("Aug 2026 | <store> ... TG"),
+  // which can wrap across 2 lines for stores with longer addresses
+  let text = raw.replace(/\n[A-Z][a-z]+ \d{4} \| [\s\S]{0,400}? TG\n/g, '\n');
+  return text
     .split('\n')
     .filter(line => {
       const t = line.trim();
       if (!t) return true;
       if (/^copyright/i.test(t)) return false;
       if (/^--\s*\d+\s*of\s*\d+\s*--$/i.test(t)) return false;
-      if (/^\w+ \d{4} \| .* TG$/.test(t)) return false; // running header line
       if (/^\d+:\d{2}(\s*\/\s*\d+:\d{2})?$/.test(t)) return false; // video player timestamps
       return true;
     })
@@ -20,10 +22,33 @@ function cleanText(raw) {
 }
 
 function findScoreAfter(text, fromIdx, toIdx) {
-  const slice = text.slice(fromIdx, toIdx === -1 ? undefined : toIdx);
-  const m = slice.match(/(\d+)\s*\/\s*(\d+)/);
-  if (!m) return null;
-  return { earned: parseInt(m[1], 10), possible: parseInt(m[2], 10) };
+  const boundary = toIdx === -1 ? text.length : toIdx;
+  const slice = text.slice(fromIdx, boundary);
+
+  // Anchor tightly on the "N/A / Yes / No" options block that immediately
+  // follows every scored question, then only look a short distance past it
+  // for a score fraction. This prevents runaway matches into unrelated
+  // later text (an address, a later question, a leaked header) when a
+  // question has no score because N/A was selected.
+  const optionsMatch = slice.match(/N\/A\s*\n\s*Yes\s*\n\s*No\s*\n/);
+  if (optionsMatch) {
+    const searchFrom = optionsMatch.index + optionsMatch[0].length;
+    const lookahead = slice.slice(searchFrom, searchFrom + 20);
+    const m = lookahead.match(/^\s*(\d+)\s*\/\s*(\d+)/);
+    return m ? { earned: parseInt(m[1], 10), possible: parseInt(m[2], 10) } : null;
+  }
+
+  // The 1-10 recommendation scale question has no N/A/Yes/No block —
+  // anchor on its enumerated "0\n1\n2...\n10\n" option list instead.
+  const scaleMatch = slice.match(/(?:^|\n)0\s*\n1\s*\n2\s*\n3\s*\n4\s*\n5\s*\n6\s*\n7\s*\n8\s*\n9\s*\n10\s*\n/);
+  if (scaleMatch) {
+    const searchFrom = scaleMatch.index + scaleMatch[0].length;
+    const lookahead = slice.slice(searchFrom, searchFrom + 20);
+    const m = lookahead.match(/^\s*(\d+)\s*\/\s*(\d+)/);
+    return m ? { earned: parseInt(m[1], 10), possible: parseInt(m[2], 10) } : null;
+  }
+
+  return null;
 }
 
 function extractSections(text) {
