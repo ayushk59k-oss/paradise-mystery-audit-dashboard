@@ -111,14 +111,17 @@ async function run() {
         const buf = await downloadFile(drive, pdf.id);
         const report = await extractAudit(buf, storeCode, storeMaster);
 
-        // sanity check: skip (don't merge) if extraction looks incomplete —
-        // protects against silently writing garbage on a malformed/edited PDF
+        // sanity check: skip (don't merge) if extraction looks incomplete or
+        // produced an impossible score — protects against silently writing
+        // garbage to the live dashboard on a malformed/mismatched-template PDF
         const totalQuestionsFound = Object.values(report.detail).flat().length;
-        if (totalQuestionsFound < 20 || !report.month) {
+        const scoresInRange = report.overall >= 0 && report.overall <= 100
+          && Object.values(report.sections).every(s => s >= 0 && s <= 100);
+        if (totalQuestionsFound < 20 || !report.month || !scoresInRange) {
           skipped.push({
             folder: folder.name,
             file: pdf.name,
-            reason: `low-confidence extraction (${totalQuestionsFound} questions found, month=${report.month})`,
+            reason: `low-confidence extraction (${totalQuestionsFound} questions found, month=${report.month}, overall=${report.overall}%, sections=${JSON.stringify(report.sections)})`,
           });
           continue;
         }
