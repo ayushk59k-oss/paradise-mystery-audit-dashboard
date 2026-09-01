@@ -464,6 +464,23 @@ function renderEntityPicker(){
 }
 
 /* ---------- Hero overall score + pass/review/critical counts ---------- */
+function setMetricRatio(cardId, count, total){
+  const card = document.getElementById(cardId);
+  if(!card) return;
+  let ratioEl = card.querySelector('.metric-ratio');
+  if(!ratioEl){
+    ratioEl = document.createElement('p');
+    ratioEl.className = 'metric-ratio small-note';
+    ratioEl.style.cssText = 'margin:3px 0 0;';
+    card.appendChild(ratioEl);
+  }
+  if(total > 0){
+    const pct = Math.round((count / total) * 100);
+    ratioEl.textContent = count + '/' + total + ' \u00b7 ' + pct + '%';
+  } else {
+    ratioEl.textContent = '';
+  }
+}
 function renderHero(list){
   const heroScore = document.getElementById('heroScore');
   const heroBadge = document.getElementById('heroBadge');
@@ -475,6 +492,9 @@ function renderHero(list){
     heroScore.textContent = '—';
     heroBadge.textContent = '';
     passEl.textContent = reviewEl.textContent = critEl.textContent = totalEl.textContent = '0';
+    setMetricRatio('metricPassCard', 0, 0);
+    setMetricRatio('metricReviewCard', 0, 0);
+    setMetricRatio('metricCritCard', 0, 0);
     return;
   }
   const avg = Math.round(list.reduce((a,r)=>a+r.overall,0)/list.length);
@@ -483,10 +503,16 @@ function renderHero(list){
   heroScore.textContent = avg + '%';
   heroBadge.textContent = t.label;
   heroBadge.className = 'badge ' + cls;
-  passEl.textContent = list.filter(r => classify(r.overall) === 'pass').length;
-  reviewEl.textContent = list.filter(r => classify(r.overall) === 'review').length;
-  critEl.textContent = list.filter(r => classify(r.overall) === 'critical').length;
+  const passCount = list.filter(r => classify(r.overall) === 'pass').length;
+  const reviewCount = list.filter(r => classify(r.overall) === 'review').length;
+  const critCount = list.filter(r => classify(r.overall) === 'critical').length;
+  passEl.textContent = passCount;
+  reviewEl.textContent = reviewCount;
+  critEl.textContent = critCount;
   totalEl.textContent = list.length;
+  setMetricRatio('metricPassCard', passCount, list.length);
+  setMetricRatio('metricReviewCard', reviewCount, list.length);
+  setMetricRatio('metricCritCard', critCount, list.length);
 }
 function renderStoreBadges(list){
   const el = document.getElementById('storeBadgeList');
