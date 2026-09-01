@@ -255,6 +255,21 @@ function wordOverlap(itemName, desc) {
   return itemWords.filter(w => descLower.includes(w)).length;
 }
 
+// Sanity check for Strategy 1's results: every extracted item name must
+// share at least one real word with something actually on the items-ordered
+// list, and no entry may have a zero-minute (identical-time) delta — both
+// are strong signs the "two times on a line" match fired on a coincidental
+// pair of unrelated timestamps in flowing prose, not a genuine structured
+// per-item entry, and the whole batch should be discarded rather than trusted.
+function twoTimesResultsPlausible(twoTimes, items) {
+  if (!items.length) return true; // nothing to cross-check against — trust it
+  return twoTimes.every(([name, delta]) => {
+    if (delta === 0) return false;
+    if (name.length < 3) return false;
+    return items.some(item => wordOverlap(item, name) > 0 || wordOverlap(name, item) > 0);
+  });
+}
+
 // Serving time = order-served time minus order-taken time. Several report
 // phrasings are seen in practice, tried in order of precision/confidence:
 //   0. Explicit joint-serving statement: "...served together, just 9 minutes
@@ -289,9 +304,16 @@ function parseServing(servingRaw, itemsOrderedRaw) {
     return items.map(item => [item, mins]);
   }
 
-  // Strategy 1: any line with exactly two clock times.
+  // Strategy 1: any line with exactly two clock times. Only trusted when it
+  // finds a result for EVERY ordered item AND each result plausibly matches a
+  // real ordered item — partial or implausible matches are a sign this fired
+  // accidentally on narrative prose (where a PDF line-wrap can put two
+  // unrelated timestamps together), so the whole batch is discarded in favor
+  // of the narrative strategy below rather than trusting a coincidental hit.
   const twoTimes = parseTwoTimesPerLine(servingRaw);
-  if (twoTimes.length) return twoTimes;
+  if (twoTimes.length && (!items.length || twoTimes.length === items.length) && twoTimesResultsPlausible(twoTimes, items)) {
+    return twoTimes;
+  }
 
   if (!items.length) return [];
 
