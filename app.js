@@ -490,13 +490,14 @@ function renderHero(list){
 }
 function renderStoreBadges(list){
   const el = document.getElementById('storeBadgeList');
-  el.style.maxHeight = '420px';
+  el.style.maxHeight = '230px';
   el.style.overflowY = 'auto';
   el.style.paddingRight = '4px';
   el.innerHTML = '';
   if(!list.length){ el.innerHTML = '<p class="small-note">No reports in this view yet.</p>'; return; }
-  // Most recently added stores first, capped to the 5 most recent.
-  const ordered = [...list].reverse().slice(0, 5);
+  // Most recently added stores first; all stores stay in the list, the
+  // container just shows roughly 5 rows at a time and scrolls for the rest.
+  const ordered = [...list].reverse();
   ordered.forEach(r => {
     const cls = classify(r.overall);
     const t = tierMeta(cls);
