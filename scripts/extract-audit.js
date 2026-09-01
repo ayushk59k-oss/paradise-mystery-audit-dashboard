@@ -149,8 +149,12 @@ function extractOverview(text) {
     out.itemsOrderedRaw = itemsMatch[1].trim();
   }
 
-  // serving time free-text (order taking process, "order taking time & order serving time")
-  const servingMatch = text.match(/order serving time for each ordered items\?\s*\n(.+?)\n\d+\./s);
+  // serving time free-text (order taking process, "order taking time & order serving time").
+  // Bounded on the NEXT KNOWN question's literal text rather than a generic
+  // "\n<digit>." pattern — the answer itself often contains its own numbered
+  // list (e.g. "1. Item A ... 2. Item B ..."), which a generic digit-dot
+  // boundary would mistake for the next form question and truncate on.
+  const servingMatch = text.match(/order serving time for each ordered items\?\s*\n([\s\S]*?)\n(?:\d+\.\s*)?Did the Service staff recommend any product items from the menu/);
   if (servingMatch) out.servingRaw = servingMatch[1].trim();
 
   return out;
@@ -167,42 +171,80 @@ function parseClockTime(str) {
   return h * 60 + min;
 }
 
-// Strategy 0: any item line with exactly two clock times on it — take the
-// absolute difference between them as the serving time, regardless of what
-// words (if any) connect the two times. This is deliberately wording-
-// independent so it isn't broken by reports phrasing things differently
-// ("received at" vs "served at" vs anything else) — it only needs two times
-// to be present on the same line.
+// Finds all clock-time mentions in a chunk of text, in both 12-hour AM/PM
+// form ("8:15 PM") and 24-hour "HH:MM hours" form ("20:06 hours"), returning
+// them in reading order with their minutes-since-midnight value.
+function findTimesInText(text) {
+  const found = [];
+  const re12 = /\d{1,2}:\s?\d{2}\s*[AP]M/gi;
+  let m;
+  while ((m = re12.exec(text)) !== null) {
+    const mins = parseClockTime(m[0].replace(/\s+/g, ''));
+    if (mins !== null) found.push({ index: m.index, raw: m[0], minutes: mins });
+  }
+  const re24 = /\b([01]?\d|2[0-3]):([0-5]\d)\s*hours\b/gi;
+  while ((m = re24.exec(text)) !== null) {
+    found.push({ index: m.index, raw: m[0], minutes: parseInt(m[1], 10) * 60 + parseInt(m[2], 10) });
+  }
+  found.sort((a, b) => a.index - b.index);
+  return found;
+}
+
+// Strategy 0: any line with exactly two clock times on it — take the
+// absolute difference as the serving time. Deliberately wording- and
+// format-independent: no leading item number required, works with either
+// 12-hour or 24-hour times, and the item name is read either from before
+// the times (dash-separated, e.g. "Item - Ordered at ... received at ...")
+// or from a trailing "for <item>" clause (e.g. "...received at ... for Item").
 function parseTwoTimesPerLine(servingRaw) {
   const results = [];
-  servingRaw.split('\n').forEach(line => {
-    const m = line.match(/^\s*\d+\.\s*(.+)$/);
-    if (!m) return;
-    const rest = m[1];
-    const times = [...rest.matchAll(/\d{1,2}:\s?\d{2}\s*[AP]M/gi)].map(t => t[0]);
+  servingRaw.split('\n').forEach(rawLine => {
+    const line = rawLine.trim();
+    if (!line) return;
+    const times = findTimesInText(line);
     if (times.length !== 2) return;
 
-    const dashIdx = rest.search(/\s-\s/);
-    const firstTimeIdx = rest.search(/\d{1,2}:\s?\d{2}\s*[AP]M/i);
-    const item = (dashIdx !== -1 ? rest.slice(0, dashIdx) : rest.slice(0, firstTimeIdx)).trim();
+    let item = null;
+    const forMatch = line.match(/\bfor\s+([^\n]+?)\s*\.?\s*$/i);
+    if (forMatch && line.indexOf(forMatch[0]) > times[1].index) {
+      item = forMatch[1].trim();
+    } else {
+      const dashIdx = line.search(/\s-\s/);
+      const cutIdx = dashIdx !== -1 ? dashIdx : times[0].index;
+      item = line.slice(0, cutIdx).replace(/^\s*\d+\.\s*/, '').trim();
+    }
     if (!item) return;
 
-    const t1 = parseClockTime(times[0].replace(/\s+/g, ''));
-    const t2 = parseClockTime(times[1].replace(/\s+/g, ''));
-    if (t1 === null || t2 === null) return;
-    let delta = Math.abs(t2 - t1);
+    let delta = Math.abs(times[1].minutes - times[0].minutes);
     if (delta > 12 * 60) delta = 24 * 60 - delta; // guard against a midnight-spanning pair
     results.push([item, delta]);
   });
   return results;
 }
 
+// Finds a clock time associated with the moment the order was placed/taken,
+// checking both word orders since reports phrase this differently
+// ("order was taken at 8:15 PM" vs "at 8:15 PM ... order was placed").
+function findOrderTakenTime(text) {
+  let m = text.match(/(?:order (?:was )?(?:taken|placed)|placed the order|were ordered)[^\n]*?(\d{1,2}:\d{2}\s*[AP]M)/i);
+  if (m) return parseClockTime(m[1]);
+  m = text.match(/(\d{1,2}:\d{2}\s*[AP]M)[^\n]*?(?:order (?:was )?(?:taken|placed)|placed the order|were ordered)/i);
+  if (m) return parseClockTime(m[1]);
+  return null;
+}
+
+// Finds "<description> served <time>" clauses in narrative text, checking
+// both word orders ("8:28 PM – X was served" and "X was served at 8:28 PM").
 function extractServeLines(servingRaw) {
   const lines = [];
-  const re = /(\d{1,2}:\d{2}\s*[AP]M)\s*[–-]\s*([^\n]*?served[^\n]*)/gi;
+  let re = /(\d{1,2}:\d{2}\s*[AP]M)\s*[–-]\s*([^\n.]*?served[^\n.]*)/gi;
   let m;
   while ((m = re.exec(servingRaw)) !== null) {
     lines.push({ time: m[1], desc: m[2] });
+  }
+  re = /([^\n.]*?served[^\n.]*?at\s*(\d{1,2}:\d{2}\s*[AP]M))/gi;
+  while ((m = re.exec(servingRaw)) !== null) {
+    lines.push({ time: m[2], desc: m[1] });
   }
   return lines;
 }
@@ -213,22 +255,21 @@ function wordOverlap(itemName, desc) {
   return itemWords.filter(w => descLower.includes(w)).length;
 }
 
-// Serving time = order-served time minus order-taken time.
-// Two report phrasings are seen in practice:
-//   1. Direct duration: "...served within 15 minutes" — used as-is.
-//   2. Clock timestamps: "8:15 PM – order taken... 8:28 PM – X was served."
-//      — serving time is computed as the difference between the two clock times.
-// For (2), when multiple dishes share generic words (e.g. two "Chicken ..."
-// items), each item is matched to whichever unclaimed serve-line has the
-// HIGHEST word overlap with its name, not just the first line containing any
-// one shared word — this avoids mismatching two dishes that share a word.
+// Serving time = order-served time minus order-taken time. Several report
+// phrasings are seen in practice, tried in order of precision/confidence:
+//   0. Explicit joint-serving statement: "...served together, just 9 minutes
+//      after the order was placed" — applies directly to every ordered item,
+//      since it's a definitive final statement (and can override an earlier,
+//      merely-promised/estimated duration mentioned elsewhere in the same text).
+//   1. Any line with exactly two clock times — take the difference (strategy
+//      above), independent of wording, numbering, or 12h/24h format.
+//   2. Direct duration: "...served within 15 minutes" — used as-is.
+//   3. Narrative with one shared order-taken time and separate per-item
+//      "served at" mentions — each item matched to its best-word-overlap
+//      unclaimed mention, to correctly split dishes that share a word
+//      (e.g. two "Chicken ..." items).
 function parseServing(servingRaw, itemsOrderedRaw) {
   if (!servingRaw) return [];
-
-  // Strategy 0: any item line with exactly two clock times — try first,
-  // most precise, wording-independent (no cross-reference to items list needed).
-  const twoTimes = parseTwoTimesPerLine(servingRaw);
-  if (twoTimes.length) return twoTimes;
 
   const items = [];
   if (itemsOrderedRaw) {
@@ -239,11 +280,24 @@ function parseServing(servingRaw, itemsOrderedRaw) {
       if (name) items.push(name);
     });
   }
+
+  // Strategy 0: explicit joint-serving override, e.g. "9 minutes after the
+  // order was placed" — applies to every ordered item when present.
+  const jointMatch = servingRaw.match(/(\d+)\s*minutes after (?:the )?order (?:was )?(?:placed|taken)/i);
+  if (jointMatch && items.length) {
+    const mins = parseInt(jointMatch[1], 10);
+    return items.map(item => [item, mins]);
+  }
+
+  // Strategy 1: any line with exactly two clock times.
+  const twoTimes = parseTwoTimesPerLine(servingRaw);
+  if (twoTimes.length) return twoTimes;
+
   if (!items.length) return [];
 
   const results = [];
 
-  // Strategy 1: direct "X minutes" phrasing.
+  // Strategy 2: direct "X minutes" phrasing.
   items.forEach(item => {
     const words = item.split(/\s+/).filter(w => w.length > 3).sort((a, b) => b.length - a.length);
     for (const w of words) {
@@ -254,10 +308,8 @@ function parseServing(servingRaw, itemsOrderedRaw) {
   });
   if (results.length) return results;
 
-  // Strategy 2: clock-timestamp phrasing — served time minus order-taken time,
-  // matching each item to its best-overlap unclaimed serve-line.
-  const orderTakenMatch = servingRaw.match(/(\d{1,2}:\d{2}\s*[AP]M)[^\n]*?order (?:was )?taken/i);
-  const orderTakenTime = orderTakenMatch ? parseClockTime(orderTakenMatch[1]) : null;
+  // Strategy 3: shared order-taken time + best-overlap per-item served mentions.
+  const orderTakenTime = findOrderTakenTime(servingRaw);
   if (orderTakenTime === null) return [];
 
   const serveLines = extractServeLines(servingRaw);
