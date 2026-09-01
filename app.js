@@ -490,6 +490,9 @@ function renderHero(list){
 }
 function renderStoreBadges(list){
   const el = document.getElementById('storeBadgeList');
+  el.style.maxHeight = '420px';
+  el.style.overflowY = 'auto';
+  el.style.paddingRight = '4px';
   el.innerHTML = '';
   if(!list.length){ el.innerHTML = '<p class="small-note">No reports in this view yet.</p>'; return; }
   const ordered = [...list].reverse(); // most recently added stores appear first
@@ -579,6 +582,14 @@ function renderSectionChart(list){
 /* ---------- Serving time table ---------- */
 function renderServing(list){
   const el = document.getElementById('servingRows');
+  const table = el.closest('table');
+  if(table && table.parentElement && !table.parentElement.classList.contains('scrollable-table-wrap')){
+    const wrap = document.createElement('div');
+    wrap.className = 'scrollable-table-wrap';
+    wrap.style.cssText = 'max-height:320px;overflow-y:auto;';
+    table.parentElement.insertBefore(wrap, table);
+    wrap.appendChild(table);
+  }
   el.innerHTML = '';
   list.forEach(r => (r.serving||[]).forEach((entry) => {
     const p = entry[0];
@@ -700,7 +711,9 @@ function renderCutList(list){
   return cutMap;
 }
 
-/* ---------- Comments — bold click prompt per section, chips reveal comment, click outside collapses ---------- */
+/* ---------- Comments — bold click prompt per section, nested collapsible
+   City -> Zonal manager -> Area manager -> Store chips reveal full comment,
+   click outside collapses ---------- */
 let commentsOutsideClickBound = false;
 function bindCommentsOutsideClick(){
   if(commentsOutsideClickBound) return;
@@ -713,6 +726,23 @@ function bindCommentsOutsideClick(){
       w.querySelectorAll('.comment-chip').forEach(c => c.style.borderColor = '');
     });
   });
+}
+function makeGroupToggle(label, level){
+  const row = document.createElement('button');
+  row.type = 'button';
+  const pad = 10 + level * 14;
+  const fontSize = (12.5 - level * 0.3).toFixed(1);
+  row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;width:100%;text-align:left;' +
+    'padding:7px ' + pad + 'px;background:' + (level === 0 ? '#fdf7ef' : '#fff') + ';border:1px solid var(--line);' +
+    'border-radius:var(--radius);font-size:' + fontSize + 'px;font-weight:' + (level === 0 ? '700' : '600') + ';cursor:pointer;';
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = label;
+  const caret = document.createElement('span');
+  caret.textContent = '▸';
+  caret.style.cssText = 'transition:transform .15s;display:inline-block;';
+  row.appendChild(labelSpan);
+  row.appendChild(caret);
+  return {row, caret};
 }
 function renderComments(list){
   const el = document.getElementById('commentsAcc');
@@ -727,37 +757,111 @@ function renderComments(list){
     title.textContent = sec;
     const prompt = document.createElement('p');
     prompt.style.cssText = 'font-size:12.5px;font-weight:700;color:var(--ink);margin:0 0 8px;';
-    prompt.textContent = 'Click a store to view its full comment';
-    const chipRow = document.createElement('div');
-    chipRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px;';
+    prompt.textContent = 'Click a city, then zonal manager, then area manager to find a store';
     const detail = document.createElement('div');
     detail.className = 'comment-detail';
-    detail.style.cssText = 'font-size:12.5px;color:var(--ink-soft);background:#fdf7ef;border-radius:var(--radius);padding:10px 12px;display:none;';
-    list.forEach(r => {
-      if(!(r.comments && r.comments[sec])) return;
-      const chip = document.createElement('button');
-      chip.className = 'comment-chip';
-      chip.textContent = r.name;
-      chip.onclick = (e) => {
-        e.stopPropagation();
-        const alreadyOpenForThis = detail.style.display === 'block' && detail.dataset.activeStore === r.name;
-        chipRow.querySelectorAll('.comment-chip').forEach(c => c.style.borderColor = '');
-        if(alreadyOpenForThis){
-          detail.style.display = 'none';
-          detail.innerHTML = '';
-          detail.dataset.activeStore = '';
-          return;
-        }
-        chip.style.borderColor = 'var(--gold)';
-        detail.style.display = 'block';
-        detail.dataset.activeStore = r.name;
-        detail.innerHTML = '<strong style="color:var(--ink);">' + r.name + ':</strong> ' + r.comments[sec];
-      };
-      chipRow.appendChild(chip);
+    detail.style.cssText = 'font-size:12.5px;color:var(--ink-soft);background:#fdf7ef;border-radius:var(--radius);padding:10px 12px;display:none;margin-top:8px;';
+
+    // Build City -> Zonal manager -> Area manager -> [reports] hierarchy,
+    // using the same master-data fields as everywhere else in the dashboard.
+    const relevant = list.filter(r => r.comments && r.comments[sec]);
+    const tree = {};
+    relevant.forEach(r => {
+      const city = r.region || 'Unassigned';
+      const zonal = r.rm || 'Unassigned';
+      const area = r.am || 'Unassigned';
+      tree[city] = tree[city] || {};
+      tree[city][zonal] = tree[city][zonal] || {};
+      tree[city][zonal][area] = tree[city][zonal][area] || [];
+      tree[city][zonal][area].push(r);
     });
+
+    const groupsEl = document.createElement('div');
+    groupsEl.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+
+    if(!Object.keys(tree).length){
+      const none = document.createElement('p');
+      none.className = 'small-note';
+      none.textContent = 'No comments in this view.';
+      groupsEl.appendChild(none);
+    }
+
+    Object.keys(tree).sort().forEach(city => {
+      const cityBox = document.createElement('div');
+      const {row: cityRow, caret: cityCaret} = makeGroupToggle(city, 0);
+      const cityBody = document.createElement('div');
+      cityBody.style.cssText = 'display:none;margin-top:5px;padding-left:8px;flex-direction:column;gap:5px;';
+      cityRow.onclick = (e) => {
+        e.stopPropagation();
+        const opening = cityBody.style.display === 'none';
+        cityBody.style.display = opening ? 'flex' : 'none';
+        cityCaret.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+      };
+
+      Object.keys(tree[city]).sort().forEach(zonal => {
+        const zonalBox = document.createElement('div');
+        const {row: zonalRow, caret: zonalCaret} = makeGroupToggle(zonal, 1);
+        const zonalBody = document.createElement('div');
+        zonalBody.style.cssText = 'display:none;margin-top:5px;padding-left:8px;flex-direction:column;gap:5px;';
+        zonalRow.onclick = (e) => {
+          e.stopPropagation();
+          const opening = zonalBody.style.display === 'none';
+          zonalBody.style.display = opening ? 'flex' : 'none';
+          zonalCaret.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+        };
+
+        Object.keys(tree[city][zonal]).sort().forEach(area => {
+          const areaBox = document.createElement('div');
+          const {row: areaRow, caret: areaCaret} = makeGroupToggle(area, 2);
+          const areaBody = document.createElement('div');
+          areaBody.style.cssText = 'display:none;margin-top:5px;padding-left:8px;flex-wrap:wrap;gap:8px;';
+          areaRow.onclick = (e) => {
+            e.stopPropagation();
+            const opening = areaBody.style.display === 'none';
+            areaBody.style.display = opening ? 'flex' : 'none';
+            areaCaret.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+          };
+
+          tree[city][zonal][area].forEach(r => {
+            const chip = document.createElement('button');
+            chip.className = 'comment-chip';
+            chip.textContent = r.name;
+            chip.onclick = (e) => {
+              e.stopPropagation();
+              const alreadyOpenForThis = detail.style.display === 'block' && detail.dataset.activeStore === r.name;
+              groupsEl.querySelectorAll('.comment-chip').forEach(c => c.style.borderColor = '');
+              if(alreadyOpenForThis){
+                detail.style.display = 'none';
+                detail.innerHTML = '';
+                detail.dataset.activeStore = '';
+                return;
+              }
+              chip.style.borderColor = 'var(--gold)';
+              detail.style.display = 'block';
+              detail.dataset.activeStore = r.name;
+              detail.innerHTML = '<strong style="color:var(--ink);">' + r.name + ':</strong> ' + r.comments[sec];
+            };
+            areaBody.appendChild(chip);
+          });
+
+          areaBox.appendChild(areaRow);
+          areaBox.appendChild(areaBody);
+          zonalBody.appendChild(areaBox);
+        });
+
+        zonalBox.appendChild(zonalRow);
+        zonalBox.appendChild(zonalBody);
+        cityBody.appendChild(zonalBox);
+      });
+
+      cityBox.appendChild(cityRow);
+      cityBox.appendChild(cityBody);
+      groupsEl.appendChild(cityBox);
+    });
+
     wrap.appendChild(title);
     wrap.appendChild(prompt);
-    wrap.appendChild(chipRow);
+    wrap.appendChild(groupsEl);
     wrap.appendChild(detail);
     el.appendChild(wrap);
   });
