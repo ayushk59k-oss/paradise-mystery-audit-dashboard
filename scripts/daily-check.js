@@ -105,7 +105,7 @@ async function sendEmail(){
   });
   const today = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
   await transporter.sendMail({
-    from: GMAIL_USER,
+    from: '"Kumar Ayush" <' + GMAIL_USER + '>',
     to: RECIPIENT_EMAIL,
     subject: 'Paradise Mystery Audit Dashboard — updated (' + today + ')',
     text: 'New mystery audit data was detected this morning. See attached screenshot of the full dashboard.\n\nLive dashboard: ' + DASHBOARD_URL,
