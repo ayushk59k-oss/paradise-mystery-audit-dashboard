@@ -156,28 +156,90 @@ function extractOverview(text) {
   return out;
 }
 
-// crude parse of "1. Item Name – Nqty" lines + serving free text into [[item, minutes]] pairs
-// best-effort only: if it can't confidently find a number of minutes per item, returns []
+function parseClockTime(str) {
+  const m = str.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!m) return null;
+  let h = parseInt(m[1], 10);
+  const min = parseInt(m[2], 10);
+  const ap = m[3].toUpperCase();
+  if (ap === 'PM' && h !== 12) h += 12;
+  if (ap === 'AM' && h === 12) h = 0;
+  return h * 60 + min;
+}
+
+function extractServeLines(servingRaw) {
+  const lines = [];
+  const re = /(\d{1,2}:\d{2}\s*[AP]M)\s*[–-]\s*([^\n]*?served[^\n]*)/gi;
+  let m;
+  while ((m = re.exec(servingRaw)) !== null) {
+    lines.push({ time: m[1], desc: m[2] });
+  }
+  return lines;
+}
+
+function wordOverlap(itemName, desc) {
+  const itemWords = itemName.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  const descLower = desc.toLowerCase();
+  return itemWords.filter(w => descLower.includes(w)).length;
+}
+
+// Serving time = order-served time minus order-taken time.
+// Two report phrasings are seen in practice:
+//   1. Direct duration: "...served within 15 minutes" — used as-is.
+//   2. Clock timestamps: "8:15 PM – order taken... 8:28 PM – X was served."
+//      — serving time is computed as the difference between the two clock times.
+// For (2), when multiple dishes share generic words (e.g. two "Chicken ..."
+// items), each item is matched to whichever unclaimed serve-line has the
+// HIGHEST word overlap with its name, not just the first line containing any
+// one shared word — this avoids mismatching two dishes that share a word.
 function parseServing(servingRaw, itemsOrderedRaw) {
   if (!servingRaw) return [];
   const items = [];
   if (itemsOrderedRaw) {
     itemsOrderedRaw.split('\n').forEach(line => {
-      const m = line.match(/\d+\.\s*(.+?)\s*[–-]\s*\d*\s*qty/i);
-      if (m) items.push(m[1].trim());
+      const m = line.match(/^\d+\.\s*(.+)$/);
+      if (!m) return;
+      const name = m[1].trim().replace(/\s*[–-]\s*\d+\s*qty\s*$/i, '').trim();
+      if (name) items.push(name);
     });
   }
+  if (!items.length) return [];
+
   const results = [];
+
+  // Strategy 1: direct "X minutes" phrasing.
   items.forEach(item => {
-    // try each significant word in the item name (longest first) against
-    // "<word...> served/within N minutes" - best-effort, skips generic words
-    const words = item.split(' ').filter(w => w.length > 3).sort((a, b) => b.length - a.length);
+    const words = item.split(/\s+/).filter(w => w.length > 3).sort((a, b) => b.length - a.length);
     for (const w of words) {
       const re = new RegExp(w + '[^.]*?(\\d+)\\s*minutes', 'i');
       const m = servingRaw.match(re);
-      if (m) {
-        results.push([item, parseInt(m[1], 10)]);
-        break;
+      if (m) { results.push([item, parseInt(m[1], 10)]); break; }
+    }
+  });
+  if (results.length) return results;
+
+  // Strategy 2: clock-timestamp phrasing — served time minus order-taken time,
+  // matching each item to its best-overlap unclaimed serve-line.
+  const orderTakenMatch = servingRaw.match(/(\d{1,2}:\d{2}\s*[AP]M)[^\n]*?order (?:was )?taken/i);
+  const orderTakenTime = orderTakenMatch ? parseClockTime(orderTakenMatch[1]) : null;
+  if (orderTakenTime === null) return [];
+
+  const serveLines = extractServeLines(servingRaw);
+  const usedIdx = new Set();
+  items.forEach(item => {
+    let bestIdx = -1, bestScore = 0;
+    serveLines.forEach((line, idx) => {
+      if (usedIdx.has(idx)) return;
+      const score = wordOverlap(item, line.desc);
+      if (score > bestScore) { bestScore = score; bestIdx = idx; }
+    });
+    if (bestIdx !== -1) {
+      usedIdx.add(bestIdx);
+      const servedTime = parseClockTime(serveLines[bestIdx].time);
+      if (servedTime !== null) {
+        let delta = servedTime - orderTakenTime;
+        if (delta < 0) delta += 24 * 60; // guard against midnight rollover
+        results.push([item, delta]);
       }
     }
   });
