@@ -495,7 +495,8 @@ function renderStoreBadges(list){
   el.style.paddingRight = '4px';
   el.innerHTML = '';
   if(!list.length){ el.innerHTML = '<p class="small-note">No reports in this view yet.</p>'; return; }
-  const ordered = [...list].reverse(); // most recently added stores appear first
+  // Most recently added stores first, capped to the 5 most recent.
+  const ordered = [...list].reverse().slice(0, 5);
   ordered.forEach(r => {
     const cls = classify(r.overall);
     const t = tierMeta(cls);
@@ -778,6 +779,7 @@ function renderComments(list){
 
     const groupsEl = document.createElement('div');
     groupsEl.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+    let openCity = null;
 
     if(!Object.keys(tree).length){
       const none = document.createElement('p');
@@ -791,11 +793,21 @@ function renderComments(list){
       const {row: cityRow, caret: cityCaret} = makeGroupToggle(city, 0);
       const cityBody = document.createElement('div');
       cityBody.style.cssText = 'display:none;margin-top:5px;padding-left:8px;flex-direction:column;gap:5px;';
+      let openZonal = null;
       cityRow.onclick = (e) => {
         e.stopPropagation();
+        detail.style.display = 'none';
+        detail.innerHTML = '';
+        detail.dataset.activeStore = '';
+        groupsEl.querySelectorAll('.comment-chip').forEach(c => c.style.borderColor = '');
         const opening = cityBody.style.display === 'none';
+        if(openCity && openCity.body !== cityBody){
+          openCity.body.style.display = 'none';
+          openCity.caret.style.transform = 'rotate(0deg)';
+        }
         cityBody.style.display = opening ? 'flex' : 'none';
         cityCaret.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+        openCity = opening ? {body: cityBody, caret: cityCaret} : null;
       };
 
       Object.keys(tree[city]).sort().forEach(zonal => {
@@ -803,11 +815,21 @@ function renderComments(list){
         const {row: zonalRow, caret: zonalCaret} = makeGroupToggle(zonal, 1);
         const zonalBody = document.createElement('div');
         zonalBody.style.cssText = 'display:none;margin-top:5px;padding-left:8px;flex-direction:column;gap:5px;';
+        let openArea = null;
         zonalRow.onclick = (e) => {
           e.stopPropagation();
+          detail.style.display = 'none';
+          detail.innerHTML = '';
+          detail.dataset.activeStore = '';
+          groupsEl.querySelectorAll('.comment-chip').forEach(c => c.style.borderColor = '');
           const opening = zonalBody.style.display === 'none';
+          if(openZonal && openZonal.body !== zonalBody){
+            openZonal.body.style.display = 'none';
+            openZonal.caret.style.transform = 'rotate(0deg)';
+          }
           zonalBody.style.display = opening ? 'flex' : 'none';
           zonalCaret.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+          openZonal = opening ? {body: zonalBody, caret: zonalCaret} : null;
         };
 
         Object.keys(tree[city][zonal]).sort().forEach(area => {
@@ -817,9 +839,18 @@ function renderComments(list){
           areaBody.style.cssText = 'display:none;margin-top:5px;padding-left:8px;flex-wrap:wrap;gap:8px;';
           areaRow.onclick = (e) => {
             e.stopPropagation();
+            detail.style.display = 'none';
+            detail.innerHTML = '';
+            detail.dataset.activeStore = '';
+            groupsEl.querySelectorAll('.comment-chip').forEach(c => c.style.borderColor = '');
             const opening = areaBody.style.display === 'none';
+            if(openArea && openArea.body !== areaBody){
+              openArea.body.style.display = 'none';
+              openArea.caret.style.transform = 'rotate(0deg)';
+            }
             areaBody.style.display = opening ? 'flex' : 'none';
             areaCaret.style.transform = opening ? 'rotate(90deg)' : 'rotate(0deg)';
+            openArea = opening ? {body: areaBody, caret: areaCaret} : null;
           };
 
           tree[city][zonal][area].forEach(r => {
