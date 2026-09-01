@@ -1,3 +1,151 @@
+/* ================= ACCESS GATE (Firebase Auth: signup/login) =================
+   Separate from the Google Sign-In block below, which is only for the
+   optional "Sync to Google Drive" feature once someone is already inside
+   the dashboard. This gate controls whether they can see the dashboard at
+   all — nobody without an account (created via the OTP-verified signup
+   flow, restricted to @paradisefoodcourt.in) gets past it. */
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyBAsO1CXgej9HLYAiu_yFKfzL0AEGpqCSk',
+  authDomain: 'paradise-audit-auth.firebaseapp.com',
+  projectId: 'paradise-audit-auth',
+  storageBucket: 'paradise-audit-auth.firebasestorage.app',
+  messagingSenderId: '662693849724',
+  appId: '1:662693849724:web:5fdf518c41687a6ff737f9',
+};
+const FIREBASE_FUNCTIONS_REGION = 'asia-south1';
+const SIGNUP_ALLOWED_DOMAIN = 'paradisefoodcourt.in';
+
+firebase.initializeApp(FIREBASE_CONFIG);
+const fbAuth = firebase.auth();
+const fbFunctions = firebase.app().functions(FIREBASE_FUNCTIONS_REGION);
+fbAuth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+
+let pendingSignupEmail = null;
+
+function showAuthMsg(elId, text, isErr){
+  const el = document.getElementById(elId);
+  el.textContent = text;
+  el.className = 'auth-msg ' + (isErr ? 'err' : 'ok');
+}
+
+function friendlyAuthError(e){
+  const code = e && e.code;
+  if(code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found'){
+    return 'Incorrect email or password.';
+  }
+  if(code === 'auth/too-many-requests') return 'Too many attempts. Please wait a bit and try again.';
+  if(code === 'auth/invalid-email') return 'Enter a valid email address.';
+  return (e && e.message) || 'Something went wrong. Please try again.';
+}
+function friendlyFunctionError(e){
+  return (e && e.message) || 'Something went wrong. Please try again.';
+}
+
+function switchAuthTab(tab){
+  document.getElementById('authTabLogin').classList.toggle('active', tab === 'login');
+  document.getElementById('authTabSignup').classList.toggle('active', tab === 'signup');
+  document.getElementById('loginForm').style.display = tab === 'login' ? 'flex' : 'none';
+  document.getElementById('signupStep1').style.display = tab === 'signup' ? 'flex' : 'none';
+  document.getElementById('signupStep2').style.display = 'none';
+  document.getElementById('signupStep3').style.display = 'none';
+  document.getElementById('loginMsg').textContent = '';
+  document.getElementById('signupStep1Msg').textContent = '';
+}
+
+function initAuthGate(){
+  document.getElementById('authTabLogin').onclick = () => switchAuthTab('login');
+  document.getElementById('authTabSignup').onclick = () => switchAuthTab('signup');
+
+  document.getElementById('loginBtn').onclick = async () => {
+    const email = document.getElementById('loginEmail').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if(!email || !password){ showAuthMsg('loginMsg', 'Enter email and password.', true); return; }
+    showAuthMsg('loginMsg', 'Signing in…', false);
+    try{
+      await fbAuth.signInWithEmailAndPassword(email, password);
+    }catch(e){
+      showAuthMsg('loginMsg', friendlyAuthError(e), true);
+    }
+  };
+
+  document.getElementById('sendOtpBtn').onclick = async () => {
+    const email = document.getElementById('signupEmail').value.trim().toLowerCase();
+    if(!email.endsWith('@' + SIGNUP_ALLOWED_DOMAIN)){
+      showAuthMsg('signupStep1Msg', 'Only @' + SIGNUP_ALLOWED_DOMAIN + ' email addresses can sign up.', true);
+      return;
+    }
+    showAuthMsg('signupStep1Msg', 'Sending code…', false);
+    try{
+      const requestSignupOtp = fbFunctions.httpsCallable('requestSignupOtp');
+      await requestSignupOtp({ email });
+      pendingSignupEmail = email;
+      document.getElementById('signupEmailConfirm').textContent = email;
+      document.getElementById('otpInput').value = '';
+      document.getElementById('signupStep1').style.display = 'none';
+      document.getElementById('signupStep2').style.display = 'flex';
+      showAuthMsg('signupStep2Msg', 'Code sent — check your inbox.', false);
+    }catch(e){
+      showAuthMsg('signupStep1Msg', friendlyFunctionError(e), true);
+    }
+  };
+
+  document.getElementById('resendOtpBtn').onclick = async () => {
+    if(!pendingSignupEmail) return;
+    showAuthMsg('signupStep2Msg', 'Resending code…', false);
+    try{
+      const requestSignupOtp = fbFunctions.httpsCallable('requestSignupOtp');
+      await requestSignupOtp({ email: pendingSignupEmail });
+      showAuthMsg('signupStep2Msg', 'New code sent — check your inbox.', false);
+    }catch(e){
+      showAuthMsg('signupStep2Msg', friendlyFunctionError(e), true);
+    }
+  };
+
+  document.getElementById('verifyOtpBtn').onclick = async () => {
+    const otp = document.getElementById('otpInput').value.trim();
+    if(!otp){ showAuthMsg('signupStep2Msg', 'Enter the code.', true); return; }
+    showAuthMsg('signupStep2Msg', 'Verifying…', false);
+    try{
+      const verifySignupOtp = fbFunctions.httpsCallable('verifySignupOtp');
+      await verifySignupOtp({ email: pendingSignupEmail, otp });
+      document.getElementById('signupStep2').style.display = 'none';
+      document.getElementById('signupStep3').style.display = 'flex';
+    }catch(e){
+      showAuthMsg('signupStep2Msg', friendlyFunctionError(e), true);
+    }
+  };
+
+  document.getElementById('createAccountBtn').onclick = async () => {
+    const pw = document.getElementById('newPassword').value;
+    const pw2 = document.getElementById('newPasswordConfirm').value;
+    if(pw.length < 8){ showAuthMsg('signupStep3Msg', 'Password must be at least 8 characters.', true); return; }
+    if(pw !== pw2){ showAuthMsg('signupStep3Msg', 'Passwords do not match.', true); return; }
+    showAuthMsg('signupStep3Msg', 'Creating account…', false);
+    try{
+      const completeSignup = fbFunctions.httpsCallable('completeSignup');
+      const result = await completeSignup({ email: pendingSignupEmail, password: pw });
+      await fbAuth.signInWithCustomToken(result.data.token);
+    }catch(e){
+      showAuthMsg('signupStep3Msg', friendlyFunctionError(e), true);
+    }
+  };
+
+  document.getElementById('appSignOutBtn').onclick = () => fbAuth.signOut();
+}
+initAuthGate();
+
+fbAuth.onAuthStateChanged((user) => {
+  const gate = document.getElementById('authGate');
+  const appContent = document.getElementById('appContent');
+  if(user){
+    gate.style.display = 'none';
+    appContent.style.display = '';
+  } else {
+    gate.style.display = 'flex';
+    appContent.style.display = 'none';
+  }
+});
+
 /* ================= CONFIG ================= */
 const GOOGLE_CLIENT_ID = '404954767828-pc79i2vf3iss26nin391c9v9f27pf2gu.apps.googleusercontent.com';
 const DRIVE_FOLDER_ID = '1mG09RBRDtB3-WtLTnWpaPZ-LpDJCyB4X';
@@ -18,6 +166,7 @@ MASTER.forEach(m => MASTER_BY_CODE[m.code] = m);
 /* ---------- Logo ---------- */
 const LOGO_B64 = document.getElementById('logo-data').textContent.trim();
 document.getElementById('logoImg').src = 'data:image/png;base64,' + LOGO_B64;
+document.getElementById('authLogoImg').src = 'data:image/png;base64,' + LOGO_B64;
 
 /* ---------- Seed data: the 3 real audited stores ---------- */
 const SEED_REPORTS = [
