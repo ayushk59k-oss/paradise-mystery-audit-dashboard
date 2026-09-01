@@ -167,6 +167,36 @@ function parseClockTime(str) {
   return h * 60 + min;
 }
 
+// Strategy 0: any item line with exactly two clock times on it — take the
+// absolute difference between them as the serving time, regardless of what
+// words (if any) connect the two times. This is deliberately wording-
+// independent so it isn't broken by reports phrasing things differently
+// ("received at" vs "served at" vs anything else) — it only needs two times
+// to be present on the same line.
+function parseTwoTimesPerLine(servingRaw) {
+  const results = [];
+  servingRaw.split('\n').forEach(line => {
+    const m = line.match(/^\s*\d+\.\s*(.+)$/);
+    if (!m) return;
+    const rest = m[1];
+    const times = [...rest.matchAll(/\d{1,2}:\s?\d{2}\s*[AP]M/gi)].map(t => t[0]);
+    if (times.length !== 2) return;
+
+    const dashIdx = rest.search(/\s-\s/);
+    const firstTimeIdx = rest.search(/\d{1,2}:\s?\d{2}\s*[AP]M/i);
+    const item = (dashIdx !== -1 ? rest.slice(0, dashIdx) : rest.slice(0, firstTimeIdx)).trim();
+    if (!item) return;
+
+    const t1 = parseClockTime(times[0].replace(/\s+/g, ''));
+    const t2 = parseClockTime(times[1].replace(/\s+/g, ''));
+    if (t1 === null || t2 === null) return;
+    let delta = Math.abs(t2 - t1);
+    if (delta > 12 * 60) delta = 24 * 60 - delta; // guard against a midnight-spanning pair
+    results.push([item, delta]);
+  });
+  return results;
+}
+
 function extractServeLines(servingRaw) {
   const lines = [];
   const re = /(\d{1,2}:\d{2}\s*[AP]M)\s*[–-]\s*([^\n]*?served[^\n]*)/gi;
@@ -194,6 +224,12 @@ function wordOverlap(itemName, desc) {
 // one shared word — this avoids mismatching two dishes that share a word.
 function parseServing(servingRaw, itemsOrderedRaw) {
   if (!servingRaw) return [];
+
+  // Strategy 0: any item line with exactly two clock times — try first,
+  // most precise, wording-independent (no cross-reference to items list needed).
+  const twoTimes = parseTwoTimesPerLine(servingRaw);
+  if (twoTimes.length) return twoTimes;
+
   const items = [];
   if (itemsOrderedRaw) {
     itemsOrderedRaw.split('\n').forEach(line => {
