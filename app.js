@@ -134,12 +134,17 @@ function initAuthGate(){
 }
 initAuthGate();
 
+let dashboardInitStarted = false;
 fbAuth.onAuthStateChanged((user) => {
   const gate = document.getElementById('authGate');
   const appContent = document.getElementById('appContent');
   if(user){
     gate.style.display = 'none';
-    appContent.style.display = '';
+    appContent.style.display = 'block';
+    if(!dashboardInitStarted){
+      dashboardInitStarted = true;
+      initDashboard();
+    }
   } else {
     gate.style.display = 'flex';
     appContent.style.display = 'none';
@@ -1533,7 +1538,12 @@ document.getElementById('signInBtn').addEventListener('click', () => requestAcce
 })();
 
 /* ---------- Init ---------- */
-(async function init(){
+// Deferred until the first successful sign-in (see the onAuthStateChanged
+// handler above) rather than run unconditionally on page load — running it
+// while #appContent is still hidden behind the auth gate would create the
+// Chart.js canvases at 0x0 size, and they don't auto-fix themselves once
+// the container becomes visible later.
+async function initDashboard(){
   initGoogleAuth();
   await loadLocal();
   document.getElementById('thPass').value = state.thresholds.pass;
@@ -1542,4 +1552,4 @@ document.getElementById('signInBtn').addEventListener('click', () => requestAcce
   renderEntityPicker();
   renderReportList();
   renderAll();
-})();
+}
