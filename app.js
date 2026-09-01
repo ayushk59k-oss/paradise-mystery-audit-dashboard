@@ -120,7 +120,7 @@ function reportsForQuarterKey(key){
 /* ---------- App state ---------- */
 let state = {
   reports: [],
-  thresholds: {pass: 80, review: 70},
+  thresholds: {pass: 79, review: 65},
   view: 'central',
   entity: null
 };
@@ -481,6 +481,14 @@ function setMetricRatio(cardId, count, total){
     ratioEl.textContent = '';
   }
 }
+function updateMetricLabels(){
+  const passLbl = document.querySelector('#metricPassCard .lbl');
+  const reviewLbl = document.querySelector('#metricReviewCard .lbl');
+  const critLbl = document.querySelector('#metricCritCard .lbl');
+  if(passLbl) passLbl.textContent = 'Pass (>' + state.thresholds.pass + '%)';
+  if(reviewLbl) reviewLbl.textContent = 'Review (' + state.thresholds.review + '-' + state.thresholds.pass + '%)';
+  if(critLbl) critLbl.textContent = 'Critical (<' + state.thresholds.review + '%)';
+}
 function renderHero(list){
   const heroScore = document.getElementById('heroScore');
   const heroBadge = document.getElementById('heroBadge');
@@ -488,6 +496,7 @@ function renderHero(list){
   const reviewEl = document.getElementById('reviewCount');
   const critEl = document.getElementById('critCount');
   const totalEl = document.getElementById('totalCount');
+  updateMetricLabels();
   if(!list.length){
     heroScore.textContent = '—';
     heroBadge.textContent = '';
