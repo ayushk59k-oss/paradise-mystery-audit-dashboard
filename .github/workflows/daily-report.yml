@@ -24,6 +24,13 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Sync audits from Drive (extract new PDFs, merge into dashboard data)
+        env:
+          GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+          DASHBOARD_FILE_ID: ${{ secrets.DASHBOARD_FILE_ID }}
+        run: npm run sync-audits
+
       - name: Run daily check (screenshots + emails only if data changed)
         env:
           GDRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.GDRIVE_SERVICE_ACCOUNT_JSON }}
@@ -32,9 +39,9 @@ jobs:
           RECIPIENT_EMAIL: ${{ secrets.RECIPIENT_EMAIL }}
         run: npm run daily-check
 
-      - name: Commit updated hash file (only runs if the hash actually changed)
+      - name: Commit updated tracking files (only runs if something actually changed)
         run: |
           git config user.name "paradise-dashboard-bot"
           git config user.email "actions@github.com"
-          git add data/last-hash.txt
-          git diff --cached --quiet && echo "No hash change to commit." || (git commit -m "Update last-hash after new data detected" && git push)
+          git add data/last-hash.txt data/processed-files.json
+          git diff --cached --quiet && echo "No changes to commit." || (git commit -m "Update tracking files after sync/check run" && git push)
