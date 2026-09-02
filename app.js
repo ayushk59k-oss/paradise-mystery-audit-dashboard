@@ -1067,6 +1067,142 @@ function renderRecommendations(list, cutMap){
 }
 
 /* ---------- Store detail: two-level drill down. Play -> section list -> click section -> questions ---------- */
+/* ---------- Per-store downloadable report (PDF / Excel) — generated from the
+   dashboard's own computed data, not the original uploaded PDF. ---------- */
+function generateStorePdf(r){
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF();
+  const marginX = 14;
+  let y = 18;
+
+  doc.setFontSize(16);
+  doc.setFont(undefined, 'bold');
+  doc.text('Mystery Audit Report', marginX, y);
+  y += 8;
+  doc.setFontSize(11);
+  doc.setFont(undefined, 'normal');
+  doc.text(r.code + ' \u2014 ' + r.name, marginX, y);
+  y += 6;
+  doc.setFontSize(9);
+  doc.setTextColor(90);
+  doc.text('Month: ' + (r.month || '-') + '   AM: ' + (r.am || '-') + '   RM: ' + (r.rm || '-') + '   Region: ' + (r.region || '-') + '   Type: ' + (r.type || '-'), marginX, y);
+  y += 8;
+  doc.setTextColor(0);
+  doc.setFontSize(13);
+  doc.setFont(undefined, 'bold');
+  doc.text('Overall score: ' + r.overall + '%', marginX, y);
+  y += 4;
+
+  const sectionRows = Object.entries(r.sections).map(([sec, score]) => [sec, score + '%']);
+  doc.autoTable({
+    startY: y + 4,
+    head: [['Section', 'Score']],
+    body: sectionRows,
+    theme: 'grid',
+    headStyles: { fillColor: [92, 20, 20] },
+    styles: { fontSize: 9 },
+    margin: { left: marginX, right: marginX },
+  });
+  y = doc.lastAutoTable.finalY + 8;
+
+  SECTION_NAMES.forEach(sec => {
+    const rows = (r.detail && r.detail[sec]) || [];
+    if(!rows.length) return;
+    if(y > 260){ doc.addPage(); y = 18; }
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.text(sec + ' \u2014 ' + (r.sections[sec] !== undefined ? r.sections[sec] + '%' : ''), marginX, y);
+    doc.autoTable({
+      startY: y + 3,
+      head: [['Question', 'Score']],
+      body: rows.map(([label, sc, max]) => [label, sc + '/' + max]),
+      theme: 'striped',
+      headStyles: { fillColor: [217, 122, 43] },
+      styles: { fontSize: 8.5 },
+      margin: { left: marginX, right: marginX },
+    });
+    y = doc.lastAutoTable.finalY + 6;
+
+    const comment = r.comments && r.comments[sec];
+    if(comment){
+      if(y > 255){ doc.addPage(); y = 18; }
+      doc.setFontSize(9);
+      doc.setFont(undefined, 'italic');
+      const wrapped = doc.splitTextToSize(comment, 180);
+      doc.text(wrapped, marginX, y);
+      y += wrapped.length * 4.2 + 6;
+      doc.setFont(undefined, 'normal');
+    }
+  });
+
+  if((r.serving || []).length){
+    if(y > 250){ doc.addPage(); y = 18; }
+    doc.setFontSize(11);
+    doc.setFont(undefined, 'bold');
+    doc.text('Food serving time', marginX, y);
+    doc.autoTable({
+      startY: y + 3,
+      head: [['Product', 'Time taken to serve']],
+      body: r.serving.map(([product, mins]) => [product, mins + ' min']),
+      theme: 'grid',
+      headStyles: { fillColor: [92, 20, 20] },
+      styles: { fontSize: 9 },
+      margin: { left: marginX, right: marginX },
+    });
+  }
+
+  doc.setFontSize(8);
+  doc.setTextColor(140);
+  doc.text('Generated from Paradise Mystery Audit Dashboard on ' + new Date().toLocaleDateString('en-IN'), marginX, 290);
+
+  doc.save(r.code + '_' + r.name.replace(/\s+/g, '_') + '_audit_report.pdf');
+}
+
+function generateStoreExcel(r){
+  const wb = XLSX.utils.book_new();
+
+  const overviewData = [
+    ['Store code', r.code],
+    ['Store name', r.name],
+    ['Month', r.month || ''],
+    ['Area manager', r.am || ''],
+    ['Zonal manager', r.rm || ''],
+    ['Region', r.region || ''],
+    ['Type', r.type || ''],
+    ['Overall score', r.overall + '%'],
+    [],
+    ['Section', 'Score'],
+    ...Object.entries(r.sections).map(([sec, score]) => [sec, score + '%']),
+  ];
+  const overviewSheet = XLSX.utils.aoa_to_sheet(overviewData);
+  XLSX.utils.book_append_sheet(wb, overviewSheet, 'Overview');
+
+  const detailData = [['Section', 'Question', 'Earned', 'Possible']];
+  SECTION_NAMES.forEach(sec => {
+    (r.detail && r.detail[sec] || []).forEach(([label, sc, max]) => {
+      detailData.push([sec, label, sc, max]);
+    });
+  });
+  const detailSheet = XLSX.utils.aoa_to_sheet(detailData);
+  XLSX.utils.book_append_sheet(wb, detailSheet, 'Question Detail');
+
+  const commentsData = [['Section', 'Comment']];
+  SECTION_NAMES.forEach(sec => {
+    const c = r.comments && r.comments[sec];
+    if(c) commentsData.push([sec, c]);
+  });
+  const commentsSheet = XLSX.utils.aoa_to_sheet(commentsData);
+  XLSX.utils.book_append_sheet(wb, commentsSheet, 'Comments');
+
+  if((r.serving || []).length){
+    const servingData = [['Product', 'Time taken to serve (min)'], ...r.serving.map(([p, m]) => [p, m])];
+    const servingSheet = XLSX.utils.aoa_to_sheet(servingData);
+    XLSX.utils.book_append_sheet(wb, servingSheet, 'Serving Time');
+  }
+
+  XLSX.writeFile(wb, r.code + '_' + r.name.replace(/\s+/g, '_') + '_audit_report.xlsx');
+}
+
 function renderStoreAccordion(list){
   const el = document.getElementById('storeAccordion');
   el.innerHTML = '';
@@ -1079,6 +1215,21 @@ function renderStoreAccordion(list){
     head.className = 'acc-head';
     head.innerHTML = '<span>' + r.code + ' &middot; ' + r.name + ' <span class="small-note">(' + r.am + ' / ' + r.rm + ')</span></span>' +
       '<span style="display:flex;align-items:center;gap:10px;"><span>' + r.overall + '%</span></span>';
+
+    const pdfBtn = document.createElement('button');
+    pdfBtn.textContent = 'PDF';
+    pdfBtn.style.cssText = 'font-size:11px;padding:5px 10px;';
+    pdfBtn.setAttribute('aria-label', 'Download PDF report for ' + r.name);
+    pdfBtn.onclick = (e) => { e.stopPropagation(); generateStorePdf(r); };
+
+    const xlsBtn = document.createElement('button');
+    xlsBtn.textContent = 'Excel';
+    xlsBtn.style.cssText = 'font-size:11px;padding:5px 10px;';
+    xlsBtn.setAttribute('aria-label', 'Download Excel report for ' + r.name);
+    xlsBtn.onclick = (e) => { e.stopPropagation(); generateStoreExcel(r); };
+
+    head.querySelector('span:last-child').appendChild(pdfBtn);
+    head.querySelector('span:last-child').appendChild(xlsBtn);
 
     const sectionLevel = document.createElement('div');
     sectionLevel.style.cssText = 'display:none;padding:10px 14px;';
