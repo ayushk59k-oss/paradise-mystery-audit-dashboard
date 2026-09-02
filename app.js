@@ -152,14 +152,9 @@ fbAuth.onAuthStateChanged((user) => {
 });
 
 /* ================= CONFIG ================= */
-const GOOGLE_CLIENT_ID = '404954767828-pc79i2vf3iss26nin391c9v9f27pf2gu.apps.googleusercontent.com';
-const DRIVE_FOLDER_ID = '1mG09RBRDtB3-WtLTnWpaPZ-LpDJCyB4X';
-const DRIVE_FILE_NAME = 'paradise_mystery_audit_data.json';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-
 /* Public read-only access so the dashboard can auto-refresh on open with NO sign-in.
-   Both values below must be filled in once you complete the setup steps (see chat) —
-   until then, auto-refresh-on-open silently falls back to browser storage. */
+   This is the sole Drive mechanism in use — there is no manual save/load or
+   sign-in UI; the backend automation writes to this file, the dashboard only reads it. */
 const DRIVE_API_KEY = 'AIzaSyDhKnb44lpQcyAD6JZeSphXB5T4TFQkz1k';
 const DRIVE_DATA_FILE_ID = '1FeH2F60ZEWr3sBUfRYbPDaz-biTI6-wz';
 
@@ -297,63 +292,11 @@ function tierMeta(cls){
   return {label:'Critical', color:'var(--fail)'};
 }
 
-/* ================= GOOGLE SIGN-IN ================= */
-let tokenClient = null;
-let accessToken = null;
-let userEmail = null;
-
-function initGoogleAuth(){
-  if(typeof google === 'undefined' || !google.accounts){
-    setTimeout(initGoogleAuth, 300);
-    return;
-  }
-  tokenClient = google.accounts.oauth2.initTokenClient({
-    client_id: GOOGLE_CLIENT_ID,
-    scope: DRIVE_SCOPE + ' email profile openid',
-    callback: () => {}
-  });
-}
-function requestAccessToken(){
-  return new Promise((resolve, reject) => {
-    if(!tokenClient){ reject(new Error('Google auth not ready yet, try again in a moment.')); return; }
-    tokenClient.callback = async (resp) => {
-      if(resp.error){ reject(new Error(resp.error)); return; }
-      accessToken = resp.access_token;
-      try{
-        const info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
-        userEmail = info.email || null;
-      }catch(e){ userEmail = null; }
-      renderAuthBox();
-      if(userEmail) autoSyncIfSignedIn();
-      resolve(accessToken);
-    };
-    tokenClient.requestAccessToken({prompt: accessToken ? '' : 'consent'});
-  });
-}
-function signOut(){
-  if(accessToken){ google.accounts.oauth2.revoke(accessToken, () => {}); }
-  accessToken = null; userEmail = null;
-  renderAuthBox();
-}
-function renderAuthBox(){
-  const box = document.getElementById('authBox');
-  if(userEmail){
-    box.innerHTML = '<span class="pill">Signed in: ' + userEmail + '</span>';
-    const out = document.createElement('button');
-    out.textContent = 'Sign out';
-    out.onclick = signOut;
-    box.appendChild(out);
-  } else {
-    box.innerHTML = '';
-    const btn = document.createElement('button');
-    btn.id = 'signInBtn';
-    btn.textContent = 'Sign in with Google';
-    btn.onclick = () => requestAccessToken().catch(e => flashStatus('Sign-in failed: ' + e.message, true));
-    box.appendChild(btn);
-  }
-}
-
-/* ---------- Public read-only Drive fetch (no sign-in needed) — used to auto-refresh on page open ---------- */
+/* ---------- Public read-only Drive fetch (no sign-in needed) — used to auto-refresh on page open.
+   This is the ONLY Drive mechanism the dashboard uses: it silently reads the
+   latest data on every page load via a public API key. There is no manual
+   sign-in, save, or load UI — the backend automation (GitHub Action) is what
+   writes new data to this file; the dashboard only ever reads it. ---------- */
 async function fetchPublicDriveData(){
   if(DRIVE_API_KEY.startsWith('PASTE_') || DRIVE_DATA_FILE_ID.startsWith('PASTE_')){
     return null; // not configured yet — caller falls back to browser storage
@@ -425,95 +368,12 @@ async function saveLocal(showMsg){
   }catch(e){
     if(showMsg) flashStatus('Could not save locally: ' + e.message, true);
   }
-  autoSyncIfSignedIn(); // fire-and-forget; only does anything if already signed in
 }
 function flashStatus(text, isErr){
   const msg = document.getElementById('storageMsg');
+  if(!msg) return;
   msg.textContent = text;
   msg.className = 'status-msg ' + (isErr ? 'err' : 'ok');
-}
-
-/* ================= GOOGLE DRIVE (REST API) ================= */
-async function driveFindFile(token){
-  const q = encodeURIComponent("name='" + DRIVE_FILE_NAME + "' and '" + DRIVE_FOLDER_ID + "' in parents and trashed=false");
-  const res = await fetch('https://www.googleapis.com/drive/v3/files?q=' + q + '&fields=files(id,name)', {headers:{Authorization:'Bearer '+token}});
-  if(!res.ok) throw new Error('Drive search failed (' + res.status + ')');
-  const data = await res.json();
-  return (data.files && data.files[0]) || null;
-}
-async function driveCreateFile(token, contentStr){
-  const boundary = 'paradise_boundary_314159265';
-  const metadata = {name: DRIVE_FILE_NAME, parents: [DRIVE_FOLDER_ID], mimeType: 'application/json'};
-  const body =
-    '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) + '\r\n' +
-    '--' + boundary + '\r\nContent-Type: application/json\r\n\r\n' + contentStr + '\r\n' +
-    '--' + boundary + '--';
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
-    method: 'POST', headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'multipart/related; boundary=' + boundary}, body
-  });
-  if(!res.ok) throw new Error('Drive create failed (' + res.status + ')');
-  return res.json();
-}
-async function driveUpdateFile(token, fileId, contentStr){
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files/' + fileId + '?uploadType=media', {
-    method: 'PATCH', headers: {Authorization: 'Bearer ' + token, 'Content-Type': 'application/json'}, body: contentStr
-  });
-  if(!res.ok) throw new Error('Drive update failed (' + res.status + ')');
-  return res.json();
-}
-async function driveDownloadFile(token, fileId){
-  const res = await fetch('https://www.googleapis.com/drive/v3/files/' + fileId + '?alt=media', {headers:{Authorization:'Bearer '+token}});
-  if(!res.ok) throw new Error('Drive download failed (' + res.status + ')');
-  return res.text();
-}
-async function driveSave(){
-  try{
-    flashStatus('Signing in / checking access…', false);
-    const token = await requestAccessToken();
-    flashStatus('Syncing to Google Drive…', false);
-    const payload = JSON.stringify({reports: state.reports, thresholds: state.thresholds});
-    const existing = await driveFindFile(token);
-    if(existing){ await driveUpdateFile(token, existing.id, payload); }
-    else { await driveCreateFile(token, payload); }
-    flashStatus('Synced to Google Drive.', false);
-  }catch(e){
-    flashStatus('Drive sync failed: ' + e.message, true);
-  }
-}
-/* Auto-sync: fires automatically after any data change, but ONLY if the user is
-   already signed in — it never pops up a sign-in prompt on its own. */
-async function autoSyncIfSignedIn(){
-  if(!userEmail || !accessToken) return;
-  try{
-    const payload = JSON.stringify({reports: state.reports, thresholds: state.thresholds});
-    const existing = await driveFindFile(accessToken);
-    if(existing){ await driveUpdateFile(accessToken, existing.id, payload); }
-    else { await driveCreateFile(accessToken, payload); }
-    flashStatus('Auto-synced to Google Drive.', false);
-  }catch(e){
-    flashStatus('Auto-sync to Drive failed: ' + e.message, true);
-  }
-}
-async function driveLoad(){
-  try{
-    flashStatus('Signing in / checking access…', false);
-    const token = await requestAccessToken();
-    flashStatus('Loading from Google Drive…', false);
-    const existing = await driveFindFile(token);
-    if(!existing){ flashStatus('No backup file found in the Drive folder yet.', true); return; }
-    const text = await driveDownloadFile(token, existing.id);
-    const parsed = JSON.parse(text);
-    state.reports = parsed.reports || [];
-    state.thresholds = parsed.thresholds || state.thresholds;
-    await saveLocal(false);
-    document.getElementById('thPass').value = state.thresholds.pass;
-    document.getElementById('thReview').value = state.thresholds.review;
-    renderReportList();
-    renderAll();
-    flashStatus('Loaded from Google Drive.', false);
-  }catch(e){
-    flashStatus('Could not load from Drive: ' + e.message, true);
-  }
 }
 
 /* ---------- Filtering by view ---------- */
@@ -528,28 +388,6 @@ function filteredReports(){
   if(state.view === 'quarter') return list.filter(r => getQuarterInfo(r.month).label === state.entity);
   if(state.view === 'class') return list.filter(r => classify(r.overall) === state.entity);
   return list;
-}
-
-/* ---------- Report list panel ---------- */
-function renderReportList(){
-  const el = document.getElementById('reportList');
-  el.innerHTML = '';
-  if(state.reports.length === 0){ el.innerHTML = '<p class="small-note">No reports yet.</p>'; return; }
-  // Show newest-added first; map back to the real index in state.reports for removal.
-  const ordered = state.reports.map((r, i) => ({r, i})).reverse();
-  ordered.forEach(({r, i}) => {
-    const row = document.createElement('div');
-    row.className = 'report-row';
-    row.innerHTML = '<span style="font-size:11.5px;">' + r.month + ' &middot; ' + r.code + ' ' + (r.name||'') + '</span>' +
-      '<span style="display:flex;align-items:center;gap:10px;"><strong>' + r.overall + '%</strong></span>';
-    const rm = document.createElement('button');
-    rm.className = 'iconbtn danger';
-    rm.textContent = '✕';
-    rm.setAttribute('aria-label','Remove report');
-    rm.onclick = () => { state.reports.splice(i,1); renderReportList(); renderAll(); saveLocal(false); };
-    row.querySelector('span:last-child').appendChild(rm);
-    el.appendChild(row);
-  });
 }
 
 /* ---------- View tabs ---------- */
@@ -1471,53 +1309,7 @@ function renderAll(){
   renderStoreAccordion(list);
 }
 
-/* ---------- Upload handlers ---------- */
-document.getElementById('pdfInput').addEventListener('change', (e) => {
-  const note = document.getElementById('pdfNote');
-  const names = [...e.target.files].map(f=>f.name).join(', ');
-  note.style.display = 'block';
-  note.textContent = 'Received: ' + names + '. PDF reports need to be sent to Claude in chat for extraction into the structured format — this uploader stores the filename as a placeholder only. Once extracted, add the record via CSV.';
-});
-document.getElementById('csvInput').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if(!file) return;
-  Papa.parse(file, {
-    header: true,
-    skipEmptyLines: true,
-    complete: (results) => {
-      try{
-        results.data.forEach(row => {
-          const rec = enrich({
-            code: row.store_code || row.code,
-            month: row.month || 'Unknown',
-            overall: Number(row.overall) || 0,
-            sections: {
-              'Ambience': Number(row.ambience) || 0,
-              'Order Taking': Number(row.order_taking) || 0,
-              'F&B Quality': Number(row.fnb_quality) || 0,
-              'Billing': Number(row.billing) || 0,
-              'Recommendation': Number(row.recommendation) || 0
-            },
-            serving: [],
-            detail: {},
-            comments: {}
-          });
-          state.reports.push(rec);
-        });
-        renderReportList();
-        renderAll();
-        saveLocal(true);
-      }catch(err){
-        flashStatus('CSV parse error: ' + err.message, true);
-      }
-    }
-  });
-});
-
 /* ---------- Wire up buttons ---------- */
-document.getElementById('saveLocalBtn').addEventListener('click', () => saveLocal(true));
-document.getElementById('driveSaveBtn').addEventListener('click', driveSave);
-document.getElementById('driveLoadBtn').addEventListener('click', driveLoad);
 document.getElementById('applyThBtn').addEventListener('click', () => {
   state.thresholds.pass = Number(document.getElementById('thPass').value) || 80;
   state.thresholds.review = Number(document.getElementById('thReview').value) || 70;
@@ -1525,7 +1317,6 @@ document.getElementById('applyThBtn').addEventListener('click', () => {
   saveLocal(false);
   flashStatus('Thresholds applied: Pass >' + state.thresholds.pass + '%, Review ' + state.thresholds.review + '-' + state.thresholds.pass + '%, Critical below.', false);
 });
-document.getElementById('signInBtn').addEventListener('click', () => requestAccessToken().catch(e => flashStatus('Sign-in failed: ' + e.message, true)));
 
 /* ---------- Compact "email summary" mode: add ?emailmode=1 to the URL to show only
    the key panels (Overall score, Revenue risk, Marks cut, AI recommendations) — used
@@ -1544,12 +1335,10 @@ document.getElementById('signInBtn').addEventListener('click', () => requestAcce
 // Chart.js canvases at 0x0 size, and they don't auto-fix themselves once
 // the container becomes visible later.
 async function initDashboard(){
-  initGoogleAuth();
   await loadLocal();
   document.getElementById('thPass').value = state.thresholds.pass;
   document.getElementById('thReview').value = state.thresholds.review;
   renderTabs();
   renderEntityPicker();
-  renderReportList();
   renderAll();
 }
