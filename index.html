@@ -174,10 +174,7 @@ body.email-mode .wrap{padding-top:6px;}
     <h1>Mystery audit dashboard</h1>
     <p>Paradise Biryani &middot; store service quality tracking</p>
   </div>
-  <div class="authbox" id="authBox">
-    <button id="signInBtn">Sign in with Google</button>
-  </div>
-  <button id="appSignOutBtn" style="background:#fff;color:var(--maroon-dark);border:none;font-weight:600;">Sign out</button>
+  <button id="appSignOutBtn" style="margin-left:auto;background:#fff;color:var(--maroon-dark);border:none;font-weight:600;">Sign out</button>
 </header>
 
 <div class="wrap" id="dashboardWrap">
@@ -190,6 +187,7 @@ body.email-mode .wrap{padding-top:6px;}
     <div><label class="small">Review &ge; (%)</label><input type="number" id="thReview" min="0" max="100" style="width:80px;"></div>
     <div><label class="small">Critical</label><input type="text" value="below Review" disabled style="width:110px;color:var(--ink-soft);"></div>
     <button class="primary" id="applyThBtn" style="margin-top:16px;">Apply thresholds</button>
+    <span class="status-msg" id="storageMsg" style="margin-top:16px;"></span>
   </div>
 </div>
 
@@ -316,32 +314,6 @@ body.email-mode .wrap{padding-top:6px;}
   <h2>9. Store detail — click play to expand full question breakdown</h2>
   <div id="storeAccordion"></div>
 </div>
-
-<!-- Report management: collapsed by default, at the bottom, list is scrollable -->
-<details class="panel email-hide" id="manageReportsPanel">
-  <summary style="cursor:pointer;font-size:15px;font-weight:600;color:var(--maroon-dark);">Manage reports (upload, save, remove)</summary>
-  <div style="margin-top:14px;">
-    <div id="reportList" style="margin-bottom:10px;max-height:220px;overflow-y:auto;padding-right:4px;"></div>
-    <div class="row" style="margin-bottom:8px;">
-      <div>
-        <label class="small">Upload CSV (structured audit export)</label>
-        <input type="file" id="csvInput" accept=".csv">
-      </div>
-      <div>
-        <label class="small">Upload PDF (manual review — will need Claude to extract)</label>
-        <input type="file" id="pdfInput" accept=".pdf" multiple>
-      </div>
-    </div>
-    <div class="fileupload" id="pdfNote" style="display:none;margin-bottom:10px;"></div>
-    <div class="row">
-      <button class="primary" id="saveLocalBtn">Save reports (this browser)</button>
-      <button id="driveSaveBtn">Sync to Google Drive</button>
-      <button id="driveLoadBtn">Load from Google Drive</button>
-      <span class="status-msg" id="storageMsg"></span>
-    </div>
-    <p class="small-note">Reports save instantly to this browser and auto-sync to Google Drive whenever you're signed in — no button click needed. Everyone who opens this link automatically sees the latest synced data. "Sync/Load from Google Drive" below stay available as manual backup/restore options.</p>
-  </div>
-</details>
 
 </div>
 </div>
