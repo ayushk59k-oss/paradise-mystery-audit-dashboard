@@ -110,5 +110,45 @@
     "processedAt": "2026-09-02T09:53:16.128Z",
     "storeCode": "S1101-05",
     "month": "Aug 2026"
+  },
+  "1zm_Qaymo0RYylDAp1L7eGUysXma6v0Yy": {
+    "md5Checksum": "404bb4513fcba2690c9a9d4fec9cdb91",
+    "fileName": "S3202 Tadepalli.pdf",
+    "folderName": "S3202 - Tadepalli",
+    "processedAt": "2026-09-02T14:19:31.285Z",
+    "storeCode": "S3202",
+    "month": "Aug 2026"
+  },
+  "11hAfxPWOKAWLInw28vUGpUyXyEV88b9a": {
+    "md5Checksum": "96fc775f113d434300ad7ac14e575c34",
+    "fileName": "S1139 Bowenpally.pdf",
+    "folderName": "S1139 - Bowenpally",
+    "processedAt": "2026-09-02T14:19:33.332Z",
+    "storeCode": "S1139",
+    "month": "Aug 2026"
+  },
+  "1a2DbAD0DBmmYaUpzT_4ex8PVsbBV58XU": {
+    "md5Checksum": "2e858288282b339d298860b9c3f53ec5",
+    "fileName": "S6107-T. Nagar.pdf",
+    "folderName": "S6107 - T Nagar",
+    "processedAt": "2026-09-02T14:19:36.317Z",
+    "storeCode": "S6107",
+    "month": "Aug 2026"
+  },
+  "1jO7cN69skdmnGwf1eG1GgELpd8LiT_VJ": {
+    "md5Checksum": "7f4e8618df16ad381e669a81ecea39bd",
+    "fileName": "S6104-Kattupakkam.pdf",
+    "folderName": "S6104 - Kattupakkam",
+    "processedAt": "2026-09-02T14:19:42.297Z",
+    "storeCode": "S6104",
+    "month": "Aug 2026"
+  },
+  "1jaMdeSUyHFs3ou5A13-DNf917Ek0Ga6k": {
+    "md5Checksum": "5b622812725dcfc2c6c52b3acf737911",
+    "fileName": "S3104-Vizag Beach Rd.pdf",
+    "folderName": "S3104 - Vizag Beach Rd",
+    "processedAt": "2026-09-02T14:19:44.483Z",
+    "storeCode": "S3104",
+    "month": "Aug 2026"
   }
 }
