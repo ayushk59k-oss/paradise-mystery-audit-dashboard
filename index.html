@@ -297,9 +297,20 @@ body.email-mode .wrap{padding-top:6px;}
   <div id="commentsAcc"></div>
 </div>
 
+<!-- Download store report: foldable, small footprint -->
+<details class="panel email-hide">
+  <summary style="cursor:pointer;font-size:15px;font-weight:600;color:var(--maroon-dark);">7. Download store report</summary>
+  <div class="row" style="margin-top:12px;align-items:center;">
+    <select id="downloadStorePick" style="min-width:220px;"></select>
+    <button class="primary" id="downloadPdfBtn">Download PDF</button>
+    <button id="downloadXlsBtn">Download Excel</button>
+  </div>
+  <p class="small-note">List respects the current view/filter above. Reports are generated from dashboard data, not the original uploaded PDF.</p>
+</details>
+
 <!-- Word cloud -->
 <div class="panel email-hide">
-  <h2>7. Word cloud — positive vs negative feedback themes</h2>
+  <h2>8. Word cloud — positive vs negative feedback themes</h2>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
     <div class="cloud-box pos"><p class="title">Positive</p><div class="cloud-words" id="posCloud"></div></div>
     <div class="cloud-box neg"><p class="title">Negative</p><div class="cloud-words" id="negCloud"></div></div>
@@ -308,13 +319,13 @@ body.email-mode .wrap{padding-top:6px;}
 
 <!-- AI recommendations -->
 <div class="panel">
-  <h2>8. AI recommendations — from lost marks + comment patterns</h2>
+  <h2>9. AI recommendations — from lost marks + comment patterns</h2>
   <div id="recList"></div>
 </div>
 
 <!-- Store detail -->
 <div class="panel email-hide">
-  <h2>9. Store detail — click play to expand full question breakdown</h2>
+  <h2>10. Store detail — click play to expand full question breakdown</h2>
   <div id="storeAccordion"></div>
 </div>
 
