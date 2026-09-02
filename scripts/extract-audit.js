@@ -4,6 +4,30 @@ const { PDFParse } = require('pdf-parse');
 const { SECTIONS } = require('./template');
 
 // ---- text cleanup ----
+// Masks calendar dates and clock times inside free-text auditor comments —
+// these can let a store's team narrow down or identify which day/time slot
+// an anonymous mystery audit visit happened, potentially identifying the
+// auditor. Masks the specific date/time phrase in place (not the whole
+// sentence), since the surrounding text is usually the substantive feedback.
+// Durations ("served within 15 minutes") are left alone — they don't reveal
+// *when* a visit happened, only how long something took.
+function maskSensitiveDateTime(text) {
+  if (!text) return text;
+  let masked = text;
+  // Clock times: 12-hour AM/PM ("7:48 PM", "08: 06 PM") and 24-hour "hours" forms
+  // ("13:47 hours", "2100 hours").
+  masked = masked.replace(/\d{1,2}:\s?\d{2}\s*[AP]M/gi, '[time removed]');
+  masked = masked.replace(/\b([01]?\d|2[0-3]):([0-5]\d)\s*hours\b/gi, '[time removed]');
+  masked = masked.replace(/\b\d{3,4}\s*hours\b/gi, '[time removed]');
+  // Explicit calendar dates: "22 August", "August 22nd, 2026", "2026-08-22", "22-08-2026".
+  const MONTHS = 'January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec';
+  masked = masked.replace(new RegExp('\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:' + MONTHS + ')(?:,?\\s*\\d{4})?\\b', 'gi'), '[date removed]');
+  masked = masked.replace(new RegExp('\\b(?:' + MONTHS + ')\\s+\\d{1,2}(?:st|nd|rd|th)?(?:,?\\s*\\d{4})?\\b', 'gi'), '[date removed]');
+  masked = masked.replace(/\b\d{4}-\d{2}-\d{2}\b/g, '[date removed]');
+  masked = masked.replace(/\b\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}\b/g, '[date removed]');
+  return masked;
+}
+
 function cleanText(raw) {
   // strip the repeated page-header banner ("Aug 2026 | <store> ... TG"),
   // which can wrap across 2 lines for stores with longer addresses
@@ -114,7 +138,7 @@ function extractSections(text) {
       const fileUploadIdx = commentText.search(/\n?\d+\.\s*File Upload/);
       if (fileUploadIdx !== -1) commentText = commentText.slice(0, fileUploadIdx);
       commentText = commentText.replace(/\n+/g, ' ').trim();
-      comments[sectionDef.key] = commentText;
+      comments[sectionDef.key] = maskSensitiveDateTime(commentText);
     } else {
       console.warn(`    ! Comment not found in ${sectionDef.key}`);
       comments[sectionDef.key] = '';
@@ -288,33 +312,12 @@ function parseServing(servingRaw, itemsOrderedRaw) {
 
   const items = [];
   if (itemsOrderedRaw) {
-    const numberedLines = [];
     itemsOrderedRaw.split('\n').forEach(line => {
       const m = line.match(/^\d+\.\s*(.+)$/);
-      if (m) numberedLines.push(m[1]);
+      if (!m) return;
+      const name = m[1].trim().replace(/\s*[–-]\s*\d+\s*qty\s*$/i, '').trim();
+      if (name) items.push(name);
     });
-    if (numberedLines.length) {
-      // Numbered list format: "1. Item A\n2. Item B"
-      numberedLines.forEach(raw => {
-        const name = raw.trim().replace(/\s*[–-]\s*\d+\s*qty\s*$/i, '').trim();
-        if (name) items.push(name);
-      });
-    } else {
-      // Unnumbered free text: one dish per line, or multiple dishes on one
-      // line joined by "and" (e.g. "Chicken Nizami Biryani\nTandoori Chicken",
-      // or "Nizami Mutton Biryani and Paneer Chilli"). Without this fallback
-      // `items` stays empty, which silently disables the plausibility check
-      // below and lets a coincidental two-clock-times match in the serving
-      // narrative masquerade as a genuine per-item result.
-      itemsOrderedRaw.split('\n').forEach(rawLine => {
-        const line = rawLine.trim();
-        if (!line) return;
-        line.split(/\s+and\s+/i).forEach(part => {
-          const name = part.trim().replace(/\s*[–-]\s*\d+\s*qty\s*$/i, '').trim();
-          if (name) items.push(name);
-        });
-      });
-    }
   }
 
   // Strategy 0: explicit joint-serving override, e.g. "9 minutes after the
@@ -342,13 +345,7 @@ function parseServing(servingRaw, itemsOrderedRaw) {
 
   // Strategy 2: direct "X minutes" phrasing.
   items.forEach(item => {
-    // Strip regex-special characters (parens, etc. — e.g. a combo item name
-    // like "Meal for Three (Combo Offer)") so a word built from the item
-    // name can't be interpreted as regex syntax when used to build `re`.
-    const words = item.split(/\s+/)
-      .map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-      .filter(w => w.replace(/\\/g, '').length > 3)
-      .sort((a, b) => b.length - a.length);
+    const words = item.split(/\s+/).filter(w => w.length > 3).sort((a, b) => b.length - a.length);
     for (const w of words) {
       const re = new RegExp(w + '[^.]*?(\\d+)\\s*minutes', 'i');
       const m = servingRaw.match(re);
