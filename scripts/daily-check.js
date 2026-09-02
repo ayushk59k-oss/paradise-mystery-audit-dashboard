@@ -5,9 +5,11 @@
  *    using a service account (no interactive login needed).
  * 2. Compares its content hash against data/last-hash.txt in this repo.
  * 3. If unchanged -> exits quietly, no email sent.
- * 4. If changed -> opens the live dashboard in a headless browser, injects
- *    the fresh data into its local storage, takes a full-page screenshot,
- *    emails it as an attachment, and updates data/last-hash.txt.
+ * 4. If changed -> logs into the dashboard as a dedicated bot account (the
+ *    dashboard now sits behind a login gate, so this step is required for
+ *    Puppeteer to see anything other than the login screen), injects the
+ *    fresh data into local storage, takes a full-page screenshot, emails it
+ *    as an attachment, and updates data/last-hash.txt.
  */
 
 const fs = require('fs');
@@ -27,6 +29,8 @@ const RECIPIENT_EMAIL = process.env.RECIPIENT_EMAIL || 'kumar.ayush@paradisefood
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_APP_PASSWORD = process.env.GMAIL_APP_PASSWORD;
 const SERVICE_ACCOUNT_JSON = process.env.GDRIVE_SERVICE_ACCOUNT_JSON;
+const BOT_EMAIL = process.env.BOT_EMAIL;
+const BOT_PASSWORD = process.env.BOT_PASSWORD;
 
 function hashContent(str){
   return crypto.createHash('sha256').update(str).digest('hex');
@@ -70,7 +74,21 @@ function writeLastHash(hash){
   fs.writeFileSync(HASH_FILE, hash, 'utf8');
 }
 
+async function waitForDashboardVisible(page, timeout){
+  await page.waitForFunction(
+    () => {
+      const el = document.getElementById('appContent');
+      return el && getComputedStyle(el).display !== 'none';
+    },
+    { timeout }
+  );
+}
+
 async function screenshotDashboard(dataJsonString){
+  if(!BOT_EMAIL || !BOT_PASSWORD){
+    throw new Error('Missing BOT_EMAIL or BOT_PASSWORD secret — needed to log into the dashboard for the screenshot, since it now sits behind a login gate.');
+  }
+
   const browser = await puppeteer.launch({
     headless: 'new',
     args: ['--no-sandbox', '--disable-setuid-sandbox']
@@ -80,11 +98,26 @@ async function screenshotDashboard(dataJsonString){
     await page.setViewport({ width: 1400, height: 1000 });
     await page.goto(DASHBOARD_URL, { waitUntil: 'networkidle0', timeout: 60000 });
 
+    // Log in as the dedicated screenshot-bot account so the auth gate lets
+    // the actual dashboard render, instead of capturing the login screen.
+    await page.waitForSelector('#loginEmail', { timeout: 20000 });
+    await page.type('#loginEmail', BOT_EMAIL, { delay: 20 });
+    await page.type('#loginPassword', BOT_PASSWORD, { delay: 20 });
+    await page.click('#loginBtn');
+    await waitForDashboardVisible(page, 30000);
+    // Give the initial data load + first render a moment to settle.
+    await new Promise(resolve => setTimeout(resolve, 1500));
+
     // Inject the fresh data into the page's local storage, then reload so the dashboard renders it.
     await page.evaluate((dataStr) => {
       window.localStorage.setItem('paradise_reports', dataStr);
     }, dataJsonString);
     await page.reload({ waitUntil: 'networkidle0', timeout: 60000 });
+
+    // Firebase Auth's LOCAL persistence survives the reload within this same
+    // page/browser context, so no need to log in again — just wait for the
+    // dashboard to be visible and re-rendered with the injected data.
+    await waitForDashboardVisible(page, 30000);
 
     // Give Chart.js a moment to finish drawing all canvases.
     await new Promise(resolve => setTimeout(resolve, 2500));
@@ -124,7 +157,7 @@ async function sendEmail(){
     return;
   }
 
-  console.log('New data detected. Rendering dashboard and taking screenshot...');
+  console.log('New data detected. Logging in and rendering dashboard for screenshot...');
   await screenshotDashboard(dataJsonString);
 
   console.log('Sending email to ' + RECIPIENT_EMAIL + '...');
