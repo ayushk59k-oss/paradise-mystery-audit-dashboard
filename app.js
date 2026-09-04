@@ -1539,5 +1539,23 @@ async function initDashboard(){
   document.getElementById('thReview').value = state.thresholds.review;
   renderTabs();
   renderEntityPicker();
+  applyViewFromUrlIfRequested();
   renderAll();
+}
+
+/* ---------- Deep-link a specific filtered view via URL params, e.g.
+   "?view=store&entity=S1153" — used by the daily screenshot robot to
+   capture one store's filtered view for the "new/updated store" emails,
+   without needing to click through the UI. ---------- */
+function applyViewFromUrlIfRequested(){
+  const params = new URLSearchParams(window.location.search);
+  const view = params.get('view');
+  const entity = params.get('entity');
+  if(!view) return;
+  const validViews = TAB_DEFS.map(([key]) => key);
+  if(!validViews.includes(view)) return;
+  state.view = view;
+  state.entity = (view === 'central') ? null : entity;
+  renderTabs();
+  renderEntityPicker();
 }
