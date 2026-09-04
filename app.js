@@ -1356,10 +1356,33 @@ function renderRevenueRisk(list){
   }
   panel.style.borderColor = 'var(--fail)';
   flagged.forEach(r => {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#fcebeb;border-radius:var(--radius);margin-bottom:6px;font-size:13px;';
-    row.innerHTML = '<span><strong>' + r.code + ' &middot; ' + r.name + '</strong> — contact details not taken, bill/receipt not issued</span><span style="color:var(--fail);font-weight:700;">' + r.overall + '%</span>';
-    el.appendChild(row);
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'background:#fcebeb;border-radius:var(--radius);margin-bottom:6px;overflow:hidden;';
+
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.style.cssText = 'width:100%;display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:none;border:none;font-size:13px;text-align:left;cursor:pointer;';
+    const hasComment = r.comments && r.comments['Billing'];
+    row.innerHTML = '<span><strong>' + r.code + ' &middot; ' + r.name + '</strong> — contact details not taken, bill/receipt not issued' +
+      (hasComment ? ' <span style="color:var(--fail);font-size:11px;">(view comment \u25b8)</span>' : '') + '</span>' +
+      '<span style="color:var(--fail);font-weight:700;flex-shrink:0;margin-left:10px;">' + r.overall + '%</span>';
+
+    const detail = document.createElement('div');
+    detail.style.cssText = 'display:none;padding:0 12px 10px;font-size:12.5px;color:var(--ink-soft);';
+    if(hasComment) detail.textContent = r.comments['Billing'];
+
+    if(hasComment){
+      row.onclick = () => {
+        const opening = detail.style.display === 'none';
+        detail.style.display = opening ? 'block' : 'none';
+        const caret = row.querySelector('span span');
+        if(caret) caret.textContent = opening ? '(view comment \u25be)' : '(view comment \u25b8)';
+      };
+    }
+
+    wrap.appendChild(row);
+    wrap.appendChild(detail);
+    el.appendChild(wrap);
   });
 }
 
