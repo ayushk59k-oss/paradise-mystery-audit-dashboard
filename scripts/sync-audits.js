@@ -9,6 +9,11 @@ const DRIVE_FOLDER_ID = process.env.DRIVE_FOLDER_ID; // "Paradise Biryani 2026" 
 const DASHBOARD_FILE_ID = process.env.DASHBOARD_FILE_ID; // paradise_mystery_audit_data.json
 const STORE_MASTER_PATH = path.join(__dirname, '..', 'data', 'store-master.json');
 const PROCESSED_LOG_PATH = path.join(__dirname, '..', 'data', 'processed-files.json');
+// Local-only file (not committed to the repo) — read by daily-check.js within
+// the same GitHub Actions job run, so it knows which specific stores changed
+// and can attach an individual screenshot for each, alongside the whole-
+// dashboard one.
+const SYNC_CHANGES_PATH = path.join(__dirname, '..', 'data', 'last-sync-changes.json');
 
 function getDriveClient() {
   const credentials = JSON.parse(process.env.GDRIVE_SERVICE_ACCOUNT_JSON);
@@ -147,21 +152,27 @@ async function run() {
     if (skipped.length) {
       console.log(`(${skipped.length} file(s) skipped:`, JSON.stringify(skipped, null, 2), ')');
     }
+    // Clear any stale changes list from a previous run, so daily-check.js
+    // doesn't mistakenly re-screenshot stores that didn't change this time.
+    fs.writeFileSync(SYNC_CHANGES_PATH, JSON.stringify([]));
     return;
   }
 
   console.log(`Fetching current dashboard data...`);
   const dashboardData = await downloadJson(drive, DASHBOARD_FILE_ID);
 
+  const changedStoreCodes = [];
   extracted.forEach(report => {
     const result = mergeReport(dashboardData, report);
     console.log(`  ${result.action}: ${report.code} (${report.month}) - overall ${report.overall}%`);
+    changedStoreCodes.push(report.code);
   });
 
   console.log('Uploading updated dashboard data to Drive...');
   await uploadJson(drive, DASHBOARD_FILE_ID, dashboardData);
 
   saveProcessedLog(processedLog);
+  fs.writeFileSync(SYNC_CHANGES_PATH, JSON.stringify(changedStoreCodes));
 
   console.log(`\nDone. ${newReportsCount} report(s) synced.`);
   if (skipped.length) {
